@@ -4,10 +4,10 @@
 
 Four-plus years keeping production data centers alive — now engineering the networks that run on them.
 
-![Intro](./assets/hero.svg?v=1)
+![Intro](./assets/hero-v2.svg?v=1)
 ![About](./assets/about-life.svg?v=1)
 ![Stack](./assets/stack.svg?v=4)
-![ID](./assets/id-dashboard.svg?v=1)
+![ID](./assets/id-dashboard-v2.svg?v=1)
 ![Connect](./assets/connect.svg?v=1)
 
 ## Work
