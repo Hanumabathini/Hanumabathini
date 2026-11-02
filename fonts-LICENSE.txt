@@ -1,0 +1,11 @@
+FONTS — DejaVu Sans Bold (display) and DejaVu Sans Mono (mono).
+The SVGs embed glyph subsets of these fonts as base64 WOFF2, generated with
+fontTools. DejaVu fonts are free software under a permissive license
+(Bitstream Vera / Arev terms): free to use, copy, modify and distribute,
+with the copyright and trademark notices preserved. Full license text ships
+with the DejaVu Fonts package (see dejavu-fonts.github.io).
+Brand marks: no third-party logos are embedded. Stack nodes and social cards
+use plain typographic badges (e.g. "in" for LinkedIn, a camera outline for
+Instagram) rather than official brand artwork.
+Barcode on the ID card: a real Code 39 encoding of "HANUMABATHINI"
+(decorative — it is not linked to any registry).
