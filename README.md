@@ -6,7 +6,7 @@ Four-plus years keeping production data centers alive — now engineering the ne
 
 ![Intro](./assets/hero.svg?v=1)
 ![About](./assets/about-life.svg?v=1)
-![Stack](./assets/stack.svg?v=1)
+![Stack](./assets/stack.svg?v=2)
 ![ID](./assets/id-dashboard.svg?v=1)
 ![Connect](./assets/connect.svg?v=1)
 
