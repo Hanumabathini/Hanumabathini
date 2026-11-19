@@ -18,7 +18,7 @@ Four-plus years keeping production data centers alive — now engineering the ne
 | Plant floors that never sleep | DR buildouts, hardware refresh cycles across live production floors, 24/7 plant floor support, cabling overhauls, CMDB audits, remote-hands support for off-site teams. |
 
 ## Experience
-
+-**2026 - present - XAI, memphis,TN -Network engineer 
 - **2024–2026 — Ericsson, Dallas, TX — Data Center Technician.** Production floors, break-fix, fiber and copper cabling.
 - **2022–2024 — Mohawk Industries, Calhoun, GA — Data Center Technician.** Hardware troubleshooting and infrastructure support.
 
