@@ -1,0 +1,229 @@
+//@version=6
+// =============================================================================
+// CNTRLR FX - Price Action Setups (Breakout / Fakeout / Onion / Continuation / Reversal)
+//
+// Auto-detects a support/resistance range from pivots, then flags:
+//   1. Breakout       - price closes beyond a fresh range edge
+//   2. Fakeout        - price wicks beyond an edge but closes back inside (fade entry)
+//   3. Onion Play     - range has aged/chopped for N bars -> tighter stop-order zone
+//   4. Continuation    - a broken level flips (old resistance -> new support, etc.)
+//                        and price retests + holds it in trend direction
+//   5. Reversal        - the flipped level fails on retest (trend exhaustion)
+//
+// "Celery Play" is tagged automatically when the signal candle is unusually
+// tight (low range) relative to ATR, matching the tight-doji variant shown
+// in the reference setups.
+//
+// NOTE: this automates the *structure* of the discretionary system in the
+// reference images. The exact meaning of "BOPCH/BOPCL" and the precise
+// visual rules for "Celery Play" are approximated - tune the inputs below
+// (especially Pivot Lookback, Zone Tolerance and Onion Min Bars) against
+// your own charts and adjust the labeled thresholds as needed.
+// =============================================================================
+indicator("CNTRLR FX - Price Action Setups", shorttitle = "CNTRLR FX", overlay = true,
+     max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ---------------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------------
+grpRange = "Range Detection"
+pivotLen      = input.int(5, "Pivot Lookback (bars each side)", minval = 2, group = grpRange)
+atrLen        = input.int(14, "ATR Length", minval = 1, group = grpRange)
+zoneTolMult   = input.float(0.5, "Zone Tolerance (x ATR)", minval = 0.1, step = 0.1, group = grpRange,
+     tooltip = "New pivot must move further than this x ATR from the current level to redefine the zone; otherwise it just reinforces (retest of) the existing zone.")
+bufferMult    = input.float(0.1, "Entry/SL Buffer (x ATR)", minval = 0.0, step = 0.05, group = grpRange)
+
+grpOnion = "Onion Play"
+onionMinBars  = input.int(4, "Bars Before Range Is Treated As 'Onion'", minval = 2, group = grpOnion)
+onionLookback = input.int(3, "Onion Tightening Lookback (bars)", minval = 2, group = grpOnion)
+
+grpTrend = "Trend Filter (Continuation / Reversal)"
+emaLen        = input.int(50, "EMA Length", minval = 5, group = grpTrend)
+showTrendEMA  = input.bool(true, "Plot Trend EMA", group = grpTrend)
+
+grpCelery = "Celery Play"
+celeryAtrMult = input.float(0.5, "Max Signal-Candle Range (x ATR) to tag 'Celery Play'", minval = 0.05, step = 0.05, group = grpCelery)
+
+grpShow = "Show Setups"
+showBreakout     = input.bool(true, "Breakout", group = grpShow)
+showFakeout      = input.bool(true, "Fakeout", group = grpShow)
+showOnion        = input.bool(true, "Onion Play", group = grpShow)
+showContinuation = input.bool(true, "Continuation", group = grpShow)
+showReversal     = input.bool(true, "Reversal", group = grpShow)
+showRangeBox     = input.bool(true, "Range Box", group = grpShow)
+
+grpColor = "Colors"
+bullColor = input.color(color.rgb(38, 166, 154), "Bullish Color", group = grpColor)
+bearColor = input.color(color.rgb(239, 83, 80), "Bearish Color", group = grpColor)
+slColor   = input.color(color.rgb(255, 82, 82), "Stoploss Color", group = grpColor)
+rangeColor = input.color(color.rgb(120, 123, 134), "Range Box Color", group = grpColor)
+
+signalBarsForward = input.int(12, "Signal Line Length (bars)", minval = 3, maxval = 60)
+
+// ---------------------------------------------------------------------------
+// Core calcs
+// ---------------------------------------------------------------------------
+atrVal   = ta.atr(atrLen)
+emaTrend = ta.ema(close, emaLen)
+isUptrend   = close > emaTrend and ta.rising(emaTrend, 3)
+isDowntrend = close < emaTrend and ta.falling(emaTrend, 3)
+
+plot(showTrendEMA ? emaTrend : na, "Trend EMA", color = color.new(color.gray, 40), linewidth = 1)
+
+ph = ta.pivothigh(pivotLen, pivotLen)
+pl = ta.pivotlow(pivotLen, pivotLen)
+
+candleRange = high - low
+isCelery = candleRange < atrVal * celeryAtrMult
+
+// ---------------------------------------------------------------------------
+// Persistent range state
+// ---------------------------------------------------------------------------
+var float resistance   = na
+var float support       = na
+var int   resStartBar   = na
+var int   supStartBar   = na
+var box   resBox        = na
+var box   supBox        = na
+var bool  supFlipped    = false
+var bool  resFlipped    = false
+
+var line  pendingBuyLine  = na
+var line  pendingBuySL    = na
+var line  pendingSellLine = na
+var line  pendingSellSL   = na
+
+// New resistance pivot
+if not na(ph)
+    phBar = bar_index - pivotLen
+    if na(resistance) or math.abs(ph - resistance) > atrVal * zoneTolMult
+        resistance := ph
+        resStartBar := phBar
+        resFlipped := false
+        box.delete(resBox)
+        resBox := showRangeBox ? box.new(phBar, resistance + atrVal * 0.12, bar_index, resistance,
+             border_color = rangeColor, bgcolor = color.new(rangeColor, 85), extend = extend.right) : na
+
+// New support pivot
+if not na(pl)
+    plBar = bar_index - pivotLen
+    if na(support) or math.abs(pl - support) > atrVal * zoneTolMult
+        support := pl
+        supStartBar := plBar
+        supFlipped := false
+        box.delete(supBox)
+        supBox := showRangeBox ? box.new(plBar, support, bar_index, support - atrVal * 0.12,
+             border_color = rangeColor, bgcolor = color.new(rangeColor, 85), extend = extend.right) : na
+
+rangeValid = not na(resistance) and not na(support) and resistance > support
+rangeAgeBars = rangeValid ? bar_index - math.max(nz(resStartBar), nz(supStartBar)) : na
+isOnionMode = rangeValid and rangeAgeBars >= onionMinBars
+
+// ---------------------------------------------------------------------------
+// Helper: draw a triggered setup (entry + SL + label)
+// ---------------------------------------------------------------------------
+drawSetup(bool isBull, float entryPrice, float slPrice, string setupName, bool celery) =>
+    col = isBull ? bullColor : bearColor
+    startBar = bar_index
+    endBar = bar_index + signalBarsForward
+    line.new(startBar, entryPrice, endBar, entryPrice, color = col, width = 2, style = line.style_dotted)
+    line.new(startBar, slPrice, endBar, slPrice, color = slColor, width = 1, style = line.style_dashed)
+    txt = setupName + (celery ? " + Celery Play" : "") + "\n" +
+         (isBull ? "Buy Stop " : "Sell Stop ") + str.tostring(entryPrice, format.mintick) +
+         "\nSL " + str.tostring(slPrice, format.mintick)
+    label.new(endBar, isBull ? slPrice : entryPrice, txt,
+         style = isBull ? label.style_label_up : label.style_label_down,
+         color = color.new(col, 80), textcolor = col, size = size.small)
+
+// ---------------------------------------------------------------------------
+// 1) Pending stop-order zone (Breakout edges, or tightened Onion edges)
+// ---------------------------------------------------------------------------
+line.delete(pendingBuyLine)
+line.delete(pendingBuySL)
+line.delete(pendingSellLine)
+line.delete(pendingSellSL)
+
+if rangeValid
+    onionHigh = ta.highest(high, onionLookback)
+    onionLow  = ta.lowest(low, onionLookback)
+
+    buyStopPx  = (isOnionMode ? math.min(onionHigh, resistance) : resistance) + atrVal * bufferMult
+    buySlPx    = (isOnionMode ? math.max(onionLow, support) : support) - atrVal * bufferMult
+    sellStopPx = (isOnionMode ? math.max(onionLow, support) : support) - atrVal * bufferMult
+    sellSlPx   = (isOnionMode ? math.min(onionHigh, resistance) : resistance) + atrVal * bufferMult
+
+    startB = math.max(nz(resStartBar), nz(supStartBar))
+    lineStyle = isOnionMode ? line.style_solid : line.style_dotted
+
+    if (showBreakout and not isOnionMode) or (showOnion and isOnionMode)
+        pendingBuyLine  := line.new(startB, buyStopPx,  bar_index, buyStopPx,  color = color.new(bullColor, 30), width = 1, style = lineStyle)
+        pendingBuySL    := line.new(startB, buySlPx,    bar_index, buySlPx,    color = color.new(slColor, 40),   width = 1, style = line.style_dashed)
+        pendingSellLine := line.new(startB, sellStopPx, bar_index, sellStopPx, color = color.new(bearColor, 30), width = 1, style = lineStyle)
+        pendingSellSL   := line.new(startB, sellSlPx,   bar_index, sellSlPx,   color = color.new(slColor, 40),   width = 1, style = line.style_dashed)
+
+// ---------------------------------------------------------------------------
+// 2) Breakout detection (also flips the broken level for continuation/reversal)
+// ---------------------------------------------------------------------------
+bullishBreakout = rangeValid and close[1] <= resistance and close > resistance
+bearishBreakout = rangeValid and close[1] >= support and close < support
+
+if bullishBreakout
+    if showBreakout
+        drawSetup(true, high + atrVal * bufferMult, low - atrVal * bufferMult, "Breakout Entry", isCelery)
+    support := resistance
+    supStartBar := bar_index
+    supFlipped := true
+    resistance := na
+
+if bearishBreakout
+    if showBreakout
+        drawSetup(false, low - atrVal * bufferMult, high + atrVal * bufferMult, "Breakout Entry", isCelery)
+    resistance := support
+    resStartBar := bar_index
+    resFlipped := true
+    support := na
+
+// ---------------------------------------------------------------------------
+// 3) Fakeout detection (false break, fade back into range)
+// ---------------------------------------------------------------------------
+bearishFakeout = rangeValid and high > resistance and close < resistance and close < open
+bullishFakeout = rangeValid and low < support and close > support and close > open
+
+if bullishFakeout and showFakeout
+    drawSetup(true, high + atrVal * bufferMult, low - atrVal * bufferMult, "Fakeout Entry", isCelery)
+
+if bearishFakeout and showFakeout
+    drawSetup(false, low - atrVal * bufferMult, high + atrVal * bufferMult, "Fakeout Entry", isCelery)
+
+// ---------------------------------------------------------------------------
+// 4) Continuation / Reversal off a flipped level
+// ---------------------------------------------------------------------------
+continuationBull = supFlipped and isUptrend and low <= support + atrVal * bufferMult and close > support and close > open
+reversalBear     = supFlipped and close < support and close[1] >= support
+
+continuationBear = resFlipped and isDowntrend and high >= resistance - atrVal * bufferMult and close < resistance and close < open
+reversalBull     = resFlipped and close > resistance and close[1] <= resistance
+
+if continuationBull and showContinuation
+    drawSetup(true, high + atrVal * bufferMult, low - atrVal * bufferMult, "Continuation Entry", isCelery)
+
+if reversalBear and showReversal
+    drawSetup(false, low - atrVal * bufferMult, ta.highest(high, 5) + atrVal * bufferMult, "Reversal Entry", isCelery)
+    supFlipped := false
+
+if continuationBear and showContinuation
+    drawSetup(false, low - atrVal * bufferMult, high + atrVal * bufferMult, "Continuation Entry", isCelery)
+
+if reversalBull and showReversal
+    drawSetup(true, high + atrVal * bufferMult, ta.lowest(low, 5) - atrVal * bufferMult, "Reversal Entry", isCelery)
+    resFlipped := false
+
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+alertcondition(bullishBreakout, "Bullish Breakout", "CNTRLR FX: Bullish breakout entry")
+alertcondition(bearishBreakout, "Bearish Breakout", "CNTRLR FX: Bearish breakout entry")
+alertcondition(bullishFakeout, "Bullish Fakeout", "CNTRLR FX: Bullish fakeout entry")
+alertcondition(bearishFakeout, "Bearish Fakeout", "CNTRLR FX: Bearish fakeout entry")
+alertcondition(continuationBull or continuationBear, "Continuation Entry", "CNTRLR FX: Continuation entry")
+alertcondition(reversalBull or reversalBear, "Reversal Entry", "CNTRLR FX: Reversal entry")
